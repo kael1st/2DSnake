@@ -1,0 +1,118 @@
+#include "raylib.h"
+#include <vector>
+
+const int cellSize = 20;
+const int screenWidth = 800;
+const int screenHeight = 600;
+const int cols = screenWidth / cellSize;
+const int rows = screenHeight / cellSize;
+
+enum Direction { UP, DOWN, LEFT, RIGHT };
+
+struct Position {
+    int x, y;
+    bool operator==(const Position& other) const {
+        return x == other.x && y == other.y;
+    }
+};
+
+int main() {
+    InitWindow(screenWidth, screenHeight, "NO Design Pattern");
+    SetTargetFPS(60);
+
+    std::vector<Position> snake = { {cols / 2, rows / 2} };
+    Position food = { GetRandomValue(0, cols - 1), GetRandomValue(0, rows - 1) };
+    Direction dir = RIGHT;
+
+    int score = 0;
+    bool isGameOver = false;
+
+    float moveTimer = 0.0f;
+    const float moveDelay = 0.1f;
+
+    while (!WindowShouldClose()) {
+        float delta = GetFrameTime();
+
+        if (!isGameOver) {
+            // Input
+            if (IsKeyPressed(KEY_UP) && dir != DOWN) dir = UP;
+            if (IsKeyPressed(KEY_DOWN) && dir != UP) dir = DOWN;
+            if (IsKeyPressed(KEY_LEFT) && dir != RIGHT) dir = LEFT;
+            if (IsKeyPressed(KEY_RIGHT) && dir != LEFT) dir = RIGHT;
+
+            // Movement timer
+            moveTimer += delta;
+            if (moveTimer >= moveDelay) {
+                moveTimer = 0.0f;
+
+                Position head = snake.front();
+
+                switch (dir) {
+                case UP:    head.y--; break;
+                case DOWN:  head.y++; break;
+                case LEFT:  head.x--; break;
+                case RIGHT: head.x++; break;
+                }
+
+                // Collision: wall
+                if (head.x < 0 || head.y < 0 || head.x >= cols || head.y >= rows) {
+                    isGameOver = true;
+                }
+
+                // Collision: self
+                for (auto& part : snake) {
+                    if (head == part) {
+                        isGameOver = true;
+                        break;
+                    }
+                }
+
+                if (!isGameOver) {
+                    snake.insert(snake.begin(), head);
+
+                    if (head == food) {
+                        score++;
+                        // Spawn new food
+                        food = { GetRandomValue(0, cols - 1), GetRandomValue(0, rows - 1) };
+                    }
+                    else {
+                        snake.pop_back();
+                    }
+                }
+            }
+        }
+
+        BeginDrawing();
+        ClearBackground(BLACK);
+
+        if (isGameOver) {
+            DrawText("Game Over! Press R to restart", 200, 280, 20, WHITE);
+            if (IsKeyPressed(KEY_R)) {
+                // Reset game
+                snake = { {cols / 2, rows / 2} };
+                food = { GetRandomValue(0, cols - 1), GetRandomValue(0, rows - 1) };
+                dir = RIGHT;
+                score = 0;
+                isGameOver = false;
+                moveTimer = 0.0f;
+            }
+        }
+        else {
+            // snake
+            for (auto& part : snake) {
+                DrawRectangle(part.x * cellSize, part.y * cellSize, cellSize, cellSize, GREEN);
+            }
+
+            // food
+            DrawRectangle(food.x * cellSize, food.y * cellSize, cellSize, cellSize, RED);
+
+            // skor
+            DrawText(TextFormat("Score: %d", score), 10, 10, 20, WHITE);
+        }
+
+        EndDrawing();
+    }
+
+    CloseWindow();
+    return 0;
+}

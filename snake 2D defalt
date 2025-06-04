@@ -1,0 +1,161 @@
+#include "raylib.h"
+#include <vector>
+
+// ---------- Constants ----------
+const int cellSize = 20;
+const int screenWidth = 800;
+const int screenHeight = 600;
+const int cols = screenWidth / cellSize;
+const int rows = screenHeight / cellSize;
+
+// ---------- Direction Enum ----------
+enum Direction { UP, DOWN, LEFT, RIGHT };
+
+// ---------- Position Struct ----------
+struct Position {
+    int x, y;
+    bool operator==(const Position& other) const {
+        return x == other.x && y == other.y;
+    }
+};
+
+// ---------- Singleton: GameManager ----------
+class GameManager {
+private:
+    static GameManager* instance;
+    GameManager() : score(0), isGameOver(false) {}
+public:
+    int score;
+    bool isGameOver;
+
+    static GameManager* GetInstance() {
+        if (!instance)
+            instance = new GameManager();
+        return instance;
+    }
+
+    void Reset() {
+        score = 0;
+        isGameOver = false;
+    }
+};
+GameManager* GameManager::instance = nullptr;
+
+// ---------- GameState Base ----------
+class GameState {
+public:
+    virtual void Update(float delta) = 0;
+    virtual void Draw() = 0;
+    virtual ~GameState() {}
+};
+
+// ---------- PlayState ----------
+class PlayState : public GameState {
+private:
+    std::vector<Position> snake;
+    Position food;
+    Direction dir = RIGHT;
+    float moveTimer = 0.0f;
+    float moveDelay = 0.1f;
+
+    void SpawnFood() {
+        food = { GetRandomValue(0, cols - 1), GetRandomValue(0, rows - 1) };
+    }
+
+public:
+    PlayState() {
+        GameManager::GetInstance()->Reset();
+        snake = { {cols / 2, rows / 2} };
+        SpawnFood();
+    }
+
+    void Update(float delta) override {
+        if (IsKeyPressed(KEY_UP) && dir != DOWN) dir = UP;
+        if (IsKeyPressed(KEY_DOWN) && dir != UP) dir = DOWN;
+        if (IsKeyPressed(KEY_LEFT) && dir != RIGHT) dir = LEFT;
+        if (IsKeyPressed(KEY_RIGHT) && dir != LEFT) dir = RIGHT;
+
+        moveTimer += delta;
+        if (moveTimer >= moveDelay) {
+            moveTimer = 0.0f;
+
+            // Move snake
+            Position head = snake.front();
+            switch (dir) {
+            case UP:    head.y--; break;
+            case DOWN:  head.y++; break;
+            case LEFT:  head.x--; break;
+            case RIGHT: head.x++; break;
+            }
+
+            // Check collision
+            if (head.x < 0 || head.y < 0 || head.x >= cols || head.y >= rows) {
+                GameManager::GetInstance()->isGameOver = true;
+                return;
+            }
+
+            for (auto& part : snake) {
+                if (head == part) {
+                    GameManager::GetInstance()->isGameOver = true;
+                    return;
+                }
+            }
+
+            snake.insert(snake.begin(), head);
+
+            if (head == food) {
+                GameManager::GetInstance()->score++;
+                SpawnFood();
+            }
+            else {
+                snake.pop_back();
+            }
+        }
+    }
+
+    void Draw() override {
+        ClearBackground(BLACK);
+
+        // Draw snake
+        for (auto& part : snake) {
+            DrawRectangle(part.x * cellSize, part.y * cellSize, cellSize, cellSize, GREEN);
+        }
+
+        // Draw food
+        DrawRectangle(food.x * cellSize, food.y * cellSize, cellSize, cellSize, RED);
+
+        // Draw score
+        DrawText(TextFormat("Score: %d", GameManager::GetInstance()->score), 10, 10, 20, WHITE);
+    }
+};
+
+// ---------- Main Function ----------
+int main() {
+    InitWindow(screenWidth, screenHeight, "Snake Game");
+    SetTargetFPS(60);
+
+    GameState* currentState = new PlayState();
+
+    while (!WindowShouldClose()) {
+        float delta = GetFrameTime();
+
+        if (GameManager::GetInstance()->isGameOver) {
+            DrawText("Game Over! Press R to restart", 200, 280, 20, WHITE);
+            if (IsKeyPressed(KEY_R)) {
+                delete currentState;
+                currentState = new PlayState();
+            }
+        }
+        else {
+            currentState->Update(delta);
+        }
+
+        BeginDrawing();
+        currentState->Draw();
+        EndDrawing();
+    }
+
+    delete currentState;
+    CloseWindow();
+    return 0;
+}

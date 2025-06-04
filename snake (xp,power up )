@@ -1,0 +1,312 @@
+#include "raylib.h"
+#include <vector>
+#include <memory>
+#include <string>
+
+using namespace std;
+
+const int cellSize = 20;
+const int screenWidth = 800;
+const int screenHeight = 600;
+const int cols = screenWidth / cellSize;
+const int rows = screenHeight / cellSize;
+
+enum Direction { UP, DOWN, LEFT, RIGHT };
+
+struct Position {
+    int x, y;
+    bool operator==(const Position& other) const {
+        return x == other.x && y == other.y;
+    }
+};
+
+class GameState;
+class PlayState;
+
+extern GameState* currentState;
+void SetCurrentState(GameState* state);
+
+class GameManager {
+private:
+    static GameManager* instance;
+    GameManager() { Reset(); }
+
+public:
+    int score;
+    bool isGameOver;
+    int level;
+    int exp;
+    float speedBuffTimer;
+    float invincibilityTimer;
+
+    static GameManager* GetInstance() {
+        if (!instance) instance = new GameManager();
+        return instance;
+    }
+
+    void Reset() {
+        score = 0;
+        isGameOver = false;
+        level = 1;
+        exp = 0;
+        speedBuffTimer = 0.0f;
+        invincibilityTimer = 0.0f;
+    }
+
+    void AddExp(int amount) {
+        exp += amount;
+        if (exp >= 10) {
+            exp -= 10;
+            level++;
+        }
+    }
+
+    bool IsInvincible() const {
+        return invincibilityTimer > 0;
+    }
+};
+GameManager* GameManager::instance = nullptr;
+
+class Food {
+public:
+    Position pos;
+    virtual void ApplyEffect() = 0;
+    virtual Color GetColor() = 0;
+    virtual bool IsGrowFood() const = 0;
+    virtual ~Food() {}
+};
+
+class RedFood : public Food {
+public:
+    void ApplyEffect() override {
+        GameManager::GetInstance()->score++;
+        GameManager::GetInstance()->AddExp(3);
+    }
+    Color GetColor() override { return RED; }
+    bool IsGrowFood() const override { return true; }
+};
+
+class BlueFood : public Food {
+public:
+    void ApplyEffect() override {
+        GameManager::GetInstance()->speedBuffTimer = 5.0f;
+        GameManager::GetInstance()->AddExp(2);
+    }
+    Color GetColor() override { return BLUE; }
+    bool IsGrowFood() const override { return false; }
+};
+
+class YellowFood : public Food {
+public:
+    void ApplyEffect() override {
+        GameManager::GetInstance()->invincibilityTimer = 5.0f;
+        GameManager::GetInstance()->AddExp(2);
+    }
+    Color GetColor() override { return YELLOW; }
+    bool IsGrowFood() const override { return false; }
+};
+
+class FoodFactory {
+public:
+    static unique_ptr<Food> CreateFood(bool mustBeGrowFood = false) {
+        int type = mustBeGrowFood ? 0 : GetRandomValue(0, 2);
+        unique_ptr<Food> food;
+        switch (type) {
+        case 0: food = make_unique<RedFood>(); break;
+        case 1: food = make_unique<BlueFood>(); break;
+        case 2: food = make_unique<YellowFood>(); break;
+        }
+        food->pos = { GetRandomValue(0, cols - 1), GetRandomValue(0, rows - 1) };
+        return food;
+    }
+};
+
+class GameState {
+public:
+    virtual void Update(float delta) = 0;
+    virtual void Draw() = 0;
+    virtual ~GameState() {}
+};
+
+class PlayState : public GameState {
+private:
+    vector<Position> snake;
+    Direction dir = RIGHT;
+    float moveTimer = 0.0f;
+    float moveDelay = 0.1f;
+
+    unique_ptr<Food> food1;
+    unique_ptr<Food> food2;
+
+    void SpawnFoods() {
+        food1 = FoodFactory::CreateFood(true);  //FOOD SPAWNER ALWAYS MERAH
+        food2 = FoodFactory::CreateFood(false); // RANDOM SPAWNER
+    }
+
+public:
+    PlayState() {
+        GameManager::GetInstance()->Reset();
+        snake = { {cols / 2, rows / 2} };
+        SpawnFoods();
+    }
+
+    void Update(float delta) override {
+        auto* gm = GameManager::GetInstance();
+
+        if (gm->isGameOver) {
+            if (IsKeyPressed(KEY_R)) {
+                SetCurrentState(new PlayState());
+            }
+            return;
+        }
+
+        if (IsKeyPressed(KEY_UP) && dir != DOWN) dir = UP;
+        if (IsKeyPressed(KEY_DOWN) && dir != UP) dir = DOWN;
+        if (IsKeyPressed(KEY_LEFT) && dir != RIGHT) dir = LEFT;
+        if (IsKeyPressed(KEY_RIGHT) && dir != LEFT) dir = RIGHT;
+
+        moveTimer += delta;
+
+        if (gm->speedBuffTimer > 0) {
+            gm->speedBuffTimer -= delta;
+            moveDelay = 0.05f;
+        }
+        else {
+            moveDelay = 0.1f;
+        }
+
+        if (gm->invincibilityTimer > 0) {
+            gm->invincibilityTimer -= delta;
+        }
+
+        if (moveTimer >= moveDelay) {
+            moveTimer = 0.0f;
+
+            Position head = snake.front();
+            switch (dir) {
+            case UP: head.y--; break;
+            case DOWN: head.y++; break;
+            case LEFT: head.x--; break;
+            case RIGHT: head.x++; break;
+            }
+
+            if (head.x < 0 || head.y < 0 || head.x >= cols || head.y >= rows) {
+                gm->isGameOver = true;
+                return;
+            }
+
+            if (!gm->IsInvincible()) {
+                for (auto& part : snake) {
+                    if (head == part) {
+                        gm->isGameOver = true;
+                        return;
+                    }
+                }
+            }
+
+            snake.insert(snake.begin(), head);
+
+            bool ateFood = false;
+            if (head == food1->pos) {
+                food1->ApplyEffect();
+                if (!food1->IsGrowFood()) snake.pop_back();
+                food1 = FoodFactory::CreateFood(true);
+                ateFood = true;
+            }
+            else if (head == food2->pos) {
+                food2->ApplyEffect();
+                if (!food2->IsGrowFood()) snake.pop_back();
+                food2 = FoodFactory::CreateFood(false);
+                ateFood = true;
+            }
+
+            if (!ateFood) {
+                snake.pop_back();
+            }
+        }
+    }
+
+    //INI UI
+    void Draw() override {
+        auto* gm = GameManager::GetInstance();
+        ClearBackground(BLACK);
+
+        for (auto& part : snake) {
+            DrawRectangle(part.x * cellSize, part.y * cellSize, cellSize, cellSize, GREEN);
+        }
+
+        DrawRectangle(food1->pos.x * cellSize, food1->pos.y * cellSize, cellSize, cellSize, food1->GetColor());
+        DrawRectangle(food2->pos.x * cellSize, food2->pos.y * cellSize, cellSize, cellSize, food2->GetColor());
+
+        DrawText(TextFormat("Score: %d", gm->score), 10, 10, 20, WHITE);
+        DrawText(TextFormat("Level: %d", gm->level), 10, 40, 20, WHITE);
+        DrawText(TextFormat("EXP: %d%%", gm->exp * 10), 10, 70, 20, WHITE);
+
+        if (gm->speedBuffTimer > 0) {
+            DrawText(TextFormat("Speed Buff: %.1f s", gm->speedBuffTimer), 10, 100, 20, BLUE);
+        }
+        if (gm->invincibilityTimer > 0) {
+            DrawText(TextFormat("Invincible: %.1f s", gm->invincibilityTimer), 10, 130, 20, YELLOW);
+        }
+
+        if (gm->isGameOver) {
+            DrawText("GAME OVER", 280, 260, 40, RED);
+            DrawText("Tekan Tombol R untuk Restart", 290, 310, 20, WHITE);
+        }
+    }
+};
+
+class MenuState : public GameState {
+private:
+    int selected = 0;
+
+public:
+    void Update(float) override {
+        if (IsKeyPressed(KEY_DOWN) || IsKeyPressed(KEY_UP)) {
+            selected = 1 - selected;
+        }
+
+        if (IsKeyPressed(KEY_ENTER)) {
+            if (selected == 0) {
+                SetCurrentState(new PlayState());
+            }
+            else {
+                CloseWindow();
+            }
+        }
+    }
+
+    void Draw() override {
+        ClearBackground(BLACK);
+        DrawText("GAME ULAR", 280, 150, 40, GREEN);
+        DrawText(selected == 0 ? "> MULAI" : "  MULAI", 320, 250, 30, WHITE);
+        DrawText(selected == 1 ? "> KELUAR" : "  KELUAR", 320, 300, 30, WHITE);
+    }
+};
+
+//Ganti State
+GameState* currentState = nullptr;
+void SetCurrentState(GameState* state) {
+    if (currentState) delete currentState;
+    currentState = state;
+}
+
+int main() {
+    InitWindow(screenWidth, screenHeight, "FINAL PROJECT DESIGN PATTERN");
+    SetTargetFPS(60);
+
+    SetCurrentState(new MenuState());
+
+    while (!WindowShouldClose()) {
+        float delta = GetFrameTime();
+        currentState->Update(delta);
+
+        BeginDrawing();
+        currentState->Draw();
+        EndDrawing();
+    }
+
+    delete currentState;
+    CloseWindow();
+    return 0;
+}
